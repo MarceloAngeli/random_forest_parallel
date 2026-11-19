@@ -133,35 +133,40 @@ DecisionTreeData *split_dataset(int feature_index,
 {
     log_if_level(1, "splitting dataset into two halves...\n");
 
-    double **left = malloc(1 * sizeof(double*));
-    double **right = malloc(1 * sizeof(double*));
-
     size_t left_count = 0;
     size_t right_count = 0;
 
     //Definitivamente é essa função que tem que ser modificada.
+    double *row;
+    //Conta o número de linhas cuja row 
+    for (size_t i = 0; i < rows; i++){
+        
+        row = data[i];
+        if(row[feature_index] < value){
+            left_count++;
+        }else{
+            right_count++;
+        }
+    }
 
+    double **left = malloc(left_count * sizeof(double*));
+    double **right = malloc(right_count * sizeof(double*));
     
+    size_t current_left = 0;
+    size_t current_right = 0;
+
     for (size_t i = 0; i < rows; ++i){
         //Adiciona um ponteiro para a linha
         double *row = data[i];
         
         //Verifica se o valor da célula nessa iteração é menor que o valor da célula recebida
-        if (row[feature_index] < value)
-        {
-            // Copy the row into the left half and resize the buffer.
-            left[left_count++] = row;
-            double **temp = realloc(left, (left_count+1) * sizeof(double*));
-            if (temp != NULL)
-                left = temp;
+        if (row[feature_index] < value){
+            left[current_left] = row;
+            current_left++;
         }
-        else
-        {
-            // Copy the row into the right half and resize the buffer.
-            right[right_count++] = row;
-            double **temp = realloc(right, (right_count+1) * sizeof(double*));
-            if (temp != NULL)
-                right = temp;
+        else{
+            right[current_right] = row;
+            current_right++;
         }
     }
     DecisionTreeData *data_split = malloc(sizeof(DecisionTreeData) * 2);
