@@ -1,9 +1,6 @@
 #include "utils.h"
-#include <omp.h>
 
 int log_level = 1;
-
-double parallelizable_time = 0;
 
 int get_log_level()
 {
@@ -46,26 +43,17 @@ int is_row_part_of_testing_fold(size_t row, const ModelContext *ctx)
 double **combine_arrays(double **first, double **second, size_t n1, size_t n2, size_t cols)
 {
     double **combined = (double **)malloc((n1 + n2) * sizeof(double) * cols);
-
-    double start = omp_get_wtime();
-
-    // Sem o row_index++ cada iteração já sabe a posição em que escreve: as linhas do
-    // first ficam em [0, n1) e as do second em [n1, n1 + n2).
-    #pragma omp parallel for
+    int row_index = 0;
     for (size_t i = 0; i < n1; ++i)
     {
-        combined[i] = first[i];
+        double *row = first[i];
+        combined[row_index++] = row;
     }
-    #pragma omp parallel for
     for (size_t j = 0; j < n2; ++j)
     {
-        combined[n1 + j] = second[j];
+        double *row = second[j];
+        combined[row_index++] = row;
     }
-
-    // Quando é chamada de dentro do train_model esse tempo já está contado lá.
-    if (!omp_in_parallel())
-        parallelizable_time += omp_get_wtime() - start;
-
     return combined;
 }
 

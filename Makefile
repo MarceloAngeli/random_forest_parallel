@@ -1,6 +1,6 @@
 CC = gcc
 
-CFLAGS = -std=c99 -O2 -g -Wall -Wextra -Wpedantic -fopenmp -D_POSIX_C_SOURCE=200809L
+CFLAGS = -std=c99 -O2 -g -Wall -Wextra -Wpedantic
 
 
 SRC = main.c \
