@@ -1,5 +1,6 @@
 #include "data.h"
 #include "log.h"
+#include <pthread.h>
 
 // Set to 1 if your CSV has a header row, 0 otherwise
 #define CSV_HAS_HEADER 1
@@ -154,12 +155,52 @@ void parse_csv(const char *file_name, double **data_p, const struct dim csv_dim)
     free(buffer);
 }
 
+// Argumentos de cada thread do pivot_data: copia as linhas de start até end.
+struct pivot_args
+{
+    const double *data;
+    double **pivoted_data;
+    size_t cols;
+    size_t start;
+    size_t end;
+};
+
+void *pivot_rows(void *arg)
+{
+    struct pivot_args *args = (struct pivot_args *)arg;
+
+    for (size_t i = args->start; i < args->end; ++i)
+        for (size_t j = 0; j < args->cols; ++j)
+            args->pivoted_data[i][j] = args->data[(i * args->cols) + j];
+
+    return NULL;
+}
+
 // Pivots and transforms the data array into a 2D array
 void pivot_data(const double *data, const struct dim csv_dim, double ***pivoted_data_p)
 {
     (*pivoted_data_p) = _2d_calloc(csv_dim.rows, csv_dim.cols);
 
-    for (size_t i = 0; i < csv_dim.rows; ++i)
-        for (size_t j = 0; j < csv_dim.cols; ++j)
-            (*pivoted_data_p)[i][j] = data[(i * csv_dim.cols) + j];
+    pthread_t *threads = malloc(sizeof(pthread_t) * num_threads);
+    struct pivot_args *args = malloc(sizeof(struct pivot_args) * num_threads);
+
+    double start = get_time();
+
+    // Divide as linhas em num_threads blocos, um pra cada thread.
+    for (int t = 0; t < num_threads; ++t)
+    {
+        args[t].data = data;
+        args[t].pivoted_data = (*pivoted_data_p);
+        args[t].cols = csv_dim.cols;
+        args[t].start = t * csv_dim.rows / num_threads;
+        args[t].end = (t + 1) * csv_dim.rows / num_threads;
+        pthread_create(&threads[t], NULL, pivot_rows, &args[t]);
+    }
+    for (int t = 0; t < num_threads; ++t)
+        pthread_join(threads[t], NULL);
+
+    parallelizable_time += get_time() - start;
+
+    free(threads);
+    free(args);
 }
