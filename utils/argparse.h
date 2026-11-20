@@ -15,6 +15,7 @@ extern const char *argp_program_bug_address;
 #define ARG_KEY_COLS "--num_cols"
 #define ARG_KEY_LOG_LEVEL "--log_level"
 #define ARG_KEY_SEED "--seed"
+#define ARG_KEY_THREADS "--num_threads"
 
 /* Used by main to communicate with parse_opt. */
 struct arguments
@@ -24,6 +25,7 @@ struct arguments
     long rows, cols;
     int log_level;
     int random_seed;
+    int num_threads;
 };
 
 

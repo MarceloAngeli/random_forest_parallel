@@ -1,6 +1,18 @@
 #include "utils.h"
+#include <time.h>
 
 int log_level = 1;
+
+int num_threads = 4;
+
+double parallelizable_time = 0;
+
+double get_time(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return ts.tv_sec + ts.tv_nsec / 1e9;
+}
 
 int get_log_level()
 {

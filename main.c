@@ -9,8 +9,17 @@
 
 int main(int argc, char **argv)
 {
+    // Tempo total agora conta desde o início, pra incluir a leitura do csv e o pivot.
+    double begin_time = get_time();
+
     struct arguments arguments;
     parse_args(argc, argv, &arguments);
+
+    if (arguments.num_threads < 1) {
+        printf("Error: num_threads must be >= 1 got: %d\n", arguments.num_threads);
+        return 1;
+    }
+    num_threads = arguments.num_threads;
 
 
     set_log_level(arguments.log_level);
@@ -26,7 +35,7 @@ int main(int argc, char **argv)
 
     const char *file_name = arguments.args[0];
     if (!file_name) {
-        printf("Usage: %s <CSV_FILE> [--num_rows N] [--num_cols N] [--log_level N] [--seed N]\n", argv[0]);
+        printf("Usage: %s <CSV_FILE> [--num_rows N] [--num_cols N] [--log_level N] [--seed N] [--num_threads N]\n", argv[0]);
         return 1;
     }
 
@@ -89,17 +98,17 @@ int main(int argc, char **argv)
 
     //log_if_level(1, "checksum of pivoted 2d array: %f\n", _2d_checksum(pivoted_data, csv_dim.rows, csv_dim.cols));
     
-    // Start the clock for timing.
-    clock_t begin_clock = clock();
-
     // Inside eval
     double cv_accuracy = cross_validate(pivoted_data, &params, &csv_dim, k_folds);
     printf("%f\n",
            (cv_accuracy * 100));
 
     // Record and output the time taken to run.
-    clock_t end_clock = clock();
-    printf("%f\n", (double)(end_clock - begin_clock) / CLOCKS_PER_SEC);
+    double total_time = get_time() - begin_time;
+    printf("%f\n", total_time);
+
+    // F = tempo paralelizável / tempo total
+    fprintf(stderr, "%.4f\n", parallelizable_time / total_time);
 
     // Free loaded csv file data.
     free(data);
