@@ -1,7 +1,6 @@
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
-#include <omp.h>
 #include "eval/eval.h"
 #include "utils/argparse.h"
 #include "utils/data.h"
@@ -10,9 +9,6 @@
 
 int main(int argc, char **argv)
 {
-    // Tempo total agora conta desde o início, pra incluir a leitura do csv e o pivot.
-    double begin_time = omp_get_wtime();
-
     struct arguments arguments;
     parse_args(argc, argv, &arguments);
 
@@ -93,19 +89,17 @@ int main(int argc, char **argv)
 
     //log_if_level(1, "checksum of pivoted 2d array: %f\n", _2d_checksum(pivoted_data, csv_dim.rows, csv_dim.cols));
     
+    // Start the clock for timing.
+    clock_t begin_clock = clock();
+
     // Inside eval
     double cv_accuracy = cross_validate(pivoted_data, &params, &csv_dim, k_folds);
-    // Acurácia já conferida, comentada pra sobrar só o tempo total e o F na saída.
-    //printf("%f\n",
-    //       (cv_accuracy * 100));
-    (void)cv_accuracy;
+    printf("%f\n",
+           (cv_accuracy * 100));
 
     // Record and output the time taken to run.
-    double total_time = omp_get_wtime() - begin_time;
-    printf("%f\n", total_time);
-
-    // F = tempo paralelizável / tempo total
-    fprintf(stderr, "%.4f\n", parallelizable_time / total_time);
+    clock_t end_clock = clock();
+    printf("%f\n", (double)(end_clock - begin_clock) / CLOCKS_PER_SEC);
 
     // Free loaded csv file data.
     free(data);
