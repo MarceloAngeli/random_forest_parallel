@@ -1,6 +1,21 @@
 #include "utils.h"
+#include <time.h>
+#include <pthread.h>
 
 int log_level = 1;
+
+int num_threads = 4;
+
+double parallelizable_time = 0;
+
+int inside_train_model = 0;
+
+double get_time(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return ts.tv_sec + ts.tv_nsec / 1e9;
+}
 
 int get_log_level()
 {
@@ -40,20 +55,68 @@ int is_row_part_of_testing_fold(size_t row, const ModelContext *ctx)
         return 0;
 }
 
+// Argumentos de cada thread do combine_arrays: copia as posições de start até end.
+struct combine_args
+{
+    double **first;
+    double **second;
+    double **combined;
+    size_t n1;
+    size_t start;
+    size_t end;
+};
+
+void *combine_rows(void *arg)
+{
+    struct combine_args *args = (struct combine_args *)arg;
+
+    // As linhas do first ficam em [0, n1) e as do second em [n1, n1 + n2).
+    for (size_t i = args->start; i < args->end; ++i)
+    {
+        if (i < args->n1)
+            args->combined[i] = args->first[i];
+        else
+            args->combined[i] = args->second[i - args->n1];
+    }
+
+    return NULL;
+}
+
 double **combine_arrays(double **first, double **second, size_t n1, size_t n2, size_t cols)
 {
     double **combined = (double **)malloc((n1 + n2) * sizeof(double) * cols);
-    int row_index = 0;
-    for (size_t i = 0; i < n1; ++i)
+
+    // Dentro do train_model já tem uma thread por bloco de árvores, então não cria mais
+    // threads aqui, e o tempo já está contado lá.
+    if (inside_train_model)
     {
-        double *row = first[i];
-        combined[row_index++] = row;
+        struct combine_args args = {first, second, combined, n1, 0, n1 + n2};
+        combine_rows(&args);
+        return combined;
     }
-    for (size_t j = 0; j < n2; ++j)
+
+    pthread_t *threads = malloc(sizeof(pthread_t) * num_threads);
+    struct combine_args *args = malloc(sizeof(struct combine_args) * num_threads);
+
+    double start = get_time();
+
+    for (int t = 0; t < num_threads; ++t)
     {
-        double *row = second[j];
-        combined[row_index++] = row;
+        args[t].first = first;
+        args[t].second = second;
+        args[t].combined = combined;
+        args[t].n1 = n1;
+        args[t].start = t * (n1 + n2) / num_threads;
+        args[t].end = (t + 1) * (n1 + n2) / num_threads;
+        pthread_create(&threads[t], NULL, combine_rows, &args[t]);
     }
+    for (int t = 0; t < num_threads; ++t)
+        pthread_join(threads[t], NULL);
+
+    parallelizable_time += get_time() - start;
+
+    free(threads);
+    free(args);
     return combined;
 }
 

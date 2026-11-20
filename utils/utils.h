@@ -21,6 +21,26 @@ The debug log level that can be adjusted via an argument.
 extern int log_level;
 
 /*
+Number of threads used in the parallel parts, can be adjusted via the '--num_threads' argument.
+*/
+extern int num_threads;
+
+/*
+Soma do tempo gasto nos trechos paralelizados, usado para calcular a fração F.
+*/
+extern double parallelizable_time;
+
+/*
+Fica em 1 enquanto as threads do train_model estão rodando.
+*/
+extern int inside_train_model;
+
+/*
+Returns the current wall clock time in seconds.
+*/
+double get_time(void);
+
+/*
 Given a pointer to a buffer array of integers returns whether or not a given integer 'n'
 is present in the array.
 */

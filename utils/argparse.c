@@ -6,6 +6,7 @@
     arguments->cols = 0;
     arguments->log_level = 1;
     arguments->random_seed = RAND_MAX;
+    arguments->num_threads = 4;
     arguments->args[0] = NULL;
 
     for (int i = 1; i < argc; ++i) {
@@ -30,6 +31,10 @@
         else if (strcmp(argv[i], ARG_KEY_SEED) == 0 && i + 1 < argc) {
             arguments->random_seed = atoi(argv[++i]);
         } 
+        //Mesma coisa com o --num_threads
+        else if (strcmp(argv[i], ARG_KEY_THREADS) == 0 && i + 1 < argc) {
+            arguments->num_threads = atoi(argv[++i]);
+        }
         //Se não for nenhum daqueles precisa ser o arquivo csv.
         else if (arguments->args[0] == NULL) {
             arguments->args[0] = argv[i]; // CSV file
