@@ -92,16 +92,48 @@ struct dim parse_csv_dims(const char *file_name)
     return (struct dim){.rows = rows, .cols = cols};
 }
 
+// Argumentos de cada thread do parse_csv: converte as linhas de start até end.
+struct parse_args
+{
+    char **lines;
+    double *data;
+    size_t cols;
+    size_t start;
+    size_t end;
+};
+
+void *parse_lines(void *arg)
+{
+    struct parse_args *args = (struct parse_args *)arg;
+    const char *delimiter = ",";
+
+    for (size_t i = args->start; i < args->end; ++i) {
+        // strtok guarda estado global, por isso troquei por strtok_r
+        char *save;
+        // A linha i sempre começa em i * cols, então as threads não escrevem na mesma posição.
+        size_t idx = i * args->cols;
+        char *token = strtok_r(args->lines[i], delimiter, &save);
+        while (token != NULL) {
+            DEBUG_PRINT("Parsing row %zu col %zu: %s\n", i + 1, (idx % args->cols) + 1, token);
+            //Coloca na posição idx do buffer o DOUBLE retirado do CSV
+            args->data[idx] = atof(token);
+            ++idx;
+            //Pega a próxima STRING
+            token = strtok_r(NULL, delimiter, &save);
+        }
+    }
+
+    return NULL;
+}
+
 // Parses the CSV file and fills the data array
 void parse_csv(const char *file_name, double **data_p, const struct dim csv_dim)
 {
 
     FILE *csv_file;
-    const char *delimiter = ",";
     char *buffer;
-    char *token;
+    char **lines;
     size_t row = 0;
-    size_t idx = 0;
 
     csv_file = fopen(file_name, "r");
     if (csv_file == NULL) {
@@ -116,42 +148,57 @@ void parse_csv(const char *file_name, double **data_p, const struct dim csv_dim)
     // Reseta o ponteiro para o início do arquivo.
     rewind(csv_file);
 
-    buffer = (char *)malloc(buf_size);
-    if (!buffer) {
+    // Agora o buffer guarda o arquivo inteiro, com um '\0' no fim de cada linha.
+    buffer = (char *)malloc(buf_size + csv_dim.rows + 1);
+    lines = (char **)malloc(sizeof(char *) * csv_dim.rows);
+    if (!buffer || !lines) {
         printf("Error: failed to allocate buffer of size %ld\n", buf_size);
         fclose(csv_file);
         exit(-1);
     }
 
-
-    while (row <= csv_dim.rows && fgets(buffer, buf_size, csv_file) != NULL) {
-        // Skip header row if present
-
-        // Não entendi como ele identificaria o header, mas ok.
-        if (CSV_HAS_HEADER && ++row == 1) continue;
-
-        if (!CSV_HAS_HEADER) ++row;
-
-        // Essa função é esquisitinha, mas ela basicamente separa uma String baseada num delimitador
-        // Para obter cada parte da String você chama ela de novo passando NULL como parâmetro.
-        // Se ela retornar NULL acabou as SubStrings
-        token = strtok(buffer, delimiter);
-        while (token != NULL) {
-            //Magia de Macros
-            DEBUG_PRINT("Parsing row %zu col %zu: %s\n", row, (idx % csv_dim.cols) + 1, token);
-            //Coloca na posição idx do buffer o DOUBLE retirado do CSV
-            (*data_p)[idx] = atof(token);
-            ++idx;
-            //Pega a próxima STRING
-            token = strtok(NULL, delimiter);
-        }
+    // Skip header row if present
+    if (CSV_HAS_HEADER && fgets(buffer, buf_size, csv_file) == NULL) {
+        printf("Error: file %s is empty\n", file_name);
+        exit(-1);
     }
 
-    log_if_level(1, "read %d rows from file %s\n", row - (CSV_HAS_HEADER ? 1 : 0), file_name);
+    // A leitura do arquivo continua sequencial, aqui só guarda onde cada linha começa.
+    char *line = buffer;
+    while (row < csv_dim.rows && fgets(line, buf_size, csv_file) != NULL) {
+        lines[row] = line;
+        line += strlen(line) + 1;
+        ++row;
+    }
+
+    pthread_t *threads = malloc(sizeof(pthread_t) * num_threads);
+    struct parse_args *args = malloc(sizeof(struct parse_args) * num_threads);
+
+    double start = get_time();
+
+    // A conversão pra double é a parte paralela, cada thread pega um bloco de linhas.
+    for (int t = 0; t < num_threads; ++t)
+    {
+        args[t].lines = lines;
+        args[t].data = (*data_p);
+        args[t].cols = csv_dim.cols;
+        args[t].start = t * row / num_threads;
+        args[t].end = (t + 1) * row / num_threads;
+        pthread_create(&threads[t], NULL, parse_lines, &args[t]);
+    }
+    for (int t = 0; t < num_threads; ++t)
+        pthread_join(threads[t], NULL);
+
+    parallelizable_time += get_time() - start;
+
+    log_if_level(1, "read %zu rows from file %s\n", row, file_name);
 
     if (fclose(csv_file) != 0) {
         printf("Warning: error closing file %s\n", file_name);
     }
+    free(threads);
+    free(args);
+    free(lines);
     free(buffer);
 }
 
