@@ -21,6 +21,11 @@ The debug log level that can be adjusted via an argument.
 extern int log_level;
 
 /*
+Soma do tempo gasto nos trechos paralelizados, usado para calcular a fração F.
+*/
+extern double parallelizable_time;
+
+/*
 Given a pointer to a buffer array of integers returns whether or not a given integer 'n'
 is present in the array.
 */

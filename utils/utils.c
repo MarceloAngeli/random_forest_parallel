@@ -2,6 +2,8 @@
 
 int log_level = 1;
 
+double parallelizable_time = 0;
+
 int get_log_level()
 {
     return log_level;
