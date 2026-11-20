@@ -100,8 +100,10 @@ int main(int argc, char **argv)
     
     // Inside eval
     double cv_accuracy = cross_validate(pivoted_data, &params, &csv_dim, k_folds);
-    printf("%f\n",
-           (cv_accuracy * 100));
+    // Acurácia já conferida, comentada pra sobrar só o tempo total e o F na saída.
+    //printf("%f\n",
+    //       (cv_accuracy * 100));
+    (void)cv_accuracy;
 
     // Record and output the time taken to run.
     double total_time = get_time() - begin_time;
