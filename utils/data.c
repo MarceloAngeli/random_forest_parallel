@@ -1,5 +1,6 @@
 #include "data.h"
 #include "log.h"
+#include <omp.h>
 
 // Set to 1 if your CSV has a header row, 0 otherwise
 #define CSV_HAS_HEADER 1
@@ -159,7 +160,13 @@ void pivot_data(const double *data, const struct dim csv_dim, double ***pivoted_
 {
     (*pivoted_data_p) = _2d_calloc(csv_dim.rows, csv_dim.cols);
 
+    double start = omp_get_wtime();
+
+    // Cada thread copia um bloco de linhas, nenhuma linha é escrita por duas threads.
+    #pragma omp parallel for
     for (size_t i = 0; i < csv_dim.rows; ++i)
         for (size_t j = 0; j < csv_dim.cols; ++j)
             (*pivoted_data_p)[i][j] = data[(i * csv_dim.cols) + j];
+
+    parallelizable_time += omp_get_wtime() - start;
 }
