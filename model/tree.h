@@ -78,16 +78,19 @@ void grow(DecisionTreeNode *decision_tree,
           size_t rows,
           size_t cols,
           long *nodeId,
+          unsigned int *seed,
           const ModelContext *ctx);
 
 /*
 Calculates the best split for the 'data' given a number of randomly selected features from the data
-(columns) up to the number of maximum number of features 'max_features'.
+(columns) up to the number of maximum number of features 'max_features'. The random numbers come
+from 'seed', so that each tree can have its own sequence.
 */
 DecisionTreeDataSplit calculate_best_data_split(double **data,
                                                 size_t max_features,
                                                 size_t rows,
                                                 size_t cols,
+                                                unsigned int *seed,
                                                 const ModelContext *ctx);
 
 /*

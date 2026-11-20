@@ -33,6 +33,7 @@ train_model_tree(double **data,
                  const RandomForestParameters *params,
                  const struct dim *csv_dim,
                  long *nodeId /* Ascending node ID generator */,
+                 unsigned int *seed /* Seed of this tree */,
                  const ModelContext *ctx);
 
 /*
