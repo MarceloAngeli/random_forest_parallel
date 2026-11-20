@@ -99,9 +99,8 @@ void parse_csv(const char *file_name, double **data_p, const struct dim csv_dim)
     FILE *csv_file;
     const char *delimiter = ",";
     char *buffer;
-    char *token;
+    char **lines;
     size_t row = 0;
-    size_t idx = 0;
 
     csv_file = fopen(file_name, "r");
     if (csv_file == NULL) {
@@ -116,42 +115,57 @@ void parse_csv(const char *file_name, double **data_p, const struct dim csv_dim)
     // Reseta o ponteiro para o início do arquivo.
     rewind(csv_file);
 
-    buffer = (char *)malloc(buf_size);
-    if (!buffer) {
+    // Agora o buffer guarda o arquivo inteiro, com um '\0' no fim de cada linha.
+    buffer = (char *)malloc(buf_size + csv_dim.rows + 1);
+    lines = (char **)malloc(sizeof(char *) * csv_dim.rows);
+    if (!buffer || !lines) {
         printf("Error: failed to allocate buffer of size %ld\n", buf_size);
         fclose(csv_file);
         exit(-1);
     }
 
+    // Skip header row if present
+    if (CSV_HAS_HEADER && fgets(buffer, buf_size, csv_file) == NULL) {
+        printf("Error: file %s is empty\n", file_name);
+        exit(-1);
+    }
 
-    while (row <= csv_dim.rows && fgets(buffer, buf_size, csv_file) != NULL) {
-        // Skip header row if present
+    // A leitura do arquivo continua sequencial, aqui só guarda onde cada linha começa.
+    char *line = buffer;
+    while (row < csv_dim.rows && fgets(line, buf_size, csv_file) != NULL) {
+        lines[row] = line;
+        line += strlen(line) + 1;
+        ++row;
+    }
 
-        // Não entendi como ele identificaria o header, mas ok.
-        if (CSV_HAS_HEADER && ++row == 1) continue;
+    double start = omp_get_wtime();
 
-        if (!CSV_HAS_HEADER) ++row;
-
-        // Essa função é esquisitinha, mas ela basicamente separa uma String baseada num delimitador
-        // Para obter cada parte da String você chama ela de novo passando NULL como parâmetro.
-        // Se ela retornar NULL acabou as SubStrings
-        token = strtok(buffer, delimiter);
+    // Cada thread converte um bloco de linhas. Como a linha i sempre começa em
+    // i * cols, as threads não escrevem na mesma posição do data.
+    #pragma omp parallel for
+    for (size_t i = 0; i < row; ++i) {
+        // strtok guarda estado global, por isso troquei por strtok_r
+        char *save;
+        size_t idx = i * csv_dim.cols;
+        char *token = strtok_r(lines[i], delimiter, &save);
         while (token != NULL) {
-            //Magia de Macros
-            DEBUG_PRINT("Parsing row %zu col %zu: %s\n", row, (idx % csv_dim.cols) + 1, token);
+            DEBUG_PRINT("Parsing row %zu col %zu: %s\n", i + 1, (idx % csv_dim.cols) + 1, token);
             //Coloca na posição idx do buffer o DOUBLE retirado do CSV
             (*data_p)[idx] = atof(token);
             ++idx;
             //Pega a próxima STRING
-            token = strtok(NULL, delimiter);
+            token = strtok_r(NULL, delimiter, &save);
         }
     }
 
-    log_if_level(1, "read %d rows from file %s\n", row - (CSV_HAS_HEADER ? 1 : 0), file_name);
+    parallelizable_time += omp_get_wtime() - start;
+
+    log_if_level(1, "read %zu rows from file %s\n", row, file_name);
 
     if (fclose(csv_file) != 0) {
         printf("Warning: error closing file %s\n", file_name);
     }
+    free(lines);
     free(buffer);
 }
 
