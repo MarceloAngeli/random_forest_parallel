@@ -96,6 +96,7 @@ const DecisionTreeNode **train_model(double **data,
     struct train_args *args = malloc(sizeof(struct train_args) * num_threads);
 
     double start = get_time();
+    inside_train_model = 1;
 
     // Populate the array with allocated memory for the random forest with pointers to individual decision
     // trees. Cada thread treina um bloco de árvores.
@@ -114,6 +115,7 @@ const DecisionTreeNode **train_model(double **data,
     for (int t = 0; t < num_threads; ++t)
         pthread_join(threads[t], NULL);
 
+    inside_train_model = 0;
     parallelizable_time += get_time() - start;
 
     free(threads);
