@@ -1,9 +1,11 @@
 #include "forest.h"
+#include <omp.h>
 
 const DecisionTreeNode *train_model_tree(double **data,
                                          const RandomForestParameters *params,
                                          const struct dim *csv_dim,
                                          long *nodeId /* Ascending node ID generator */,
+                                         unsigned int *seed /* Seed of this tree */,
                                          const ModelContext *ctx)
 {
     //Retorna um Node vazio.
@@ -13,6 +15,7 @@ const DecisionTreeNode *train_model_tree(double **data,
                                                                  params->max_features,
                                                                  csv_dim->rows,
                                                                  csv_dim->cols,
+                                                                 seed,
                                                                  ctx);
     
                                                                  
@@ -36,6 +39,7 @@ const DecisionTreeNode *train_model_tree(double **data,
          csv_dim->rows,
          csv_dim->cols,
          nodeId,
+         seed,
          ctx);
 
     // Free any temp memory.
@@ -53,18 +57,31 @@ const DecisionTreeNode **train_model(double **data,
     const DecisionTreeNode **random_forest = (const DecisionTreeNode **)
         malloc(sizeof(DecisionTreeNode *) * params->n_estimators);
 
-    // Node ID generator. We use this such that every node in the tree gets assigned a strictly
-    // increasing ID for debugging.
-    long nodeId = 0;
+    // O rand() não pode ser chamado por várias threads, então sorteia aqui (ainda sequencial)
+    // uma seed pra cada árvore e dentro da árvore usa o rand_r.
+    unsigned int *seeds = malloc(sizeof(unsigned int) * params->n_estimators);
+    for (size_t i = 0; i < params->n_estimators; ++i)
+        seeds[i] = rand();
+
+    double start = omp_get_wtime();
 
     // Populate the array with allocated memory for the random forest with pointers to individual decision
     // trees.
-    
-    //Da pra PARALELIZAR bem fácil.
+
+    // Uma árvore por iteração. O dynamic é porque as árvores não demoram todas o mesmo tempo.
+    #pragma omp parallel for schedule(dynamic)
     for (size_t i = 0; i < params->n_estimators; ++i)
     {
-        random_forest[i] = train_model_tree(data, params, csv_dim, &nodeId, ctx);
+        // Node ID generator. Agora é um por árvore, senão as threads disputariam o mesmo contador.
+        long nodeId = 0;
+        unsigned int seed = seeds[i];
+
+        random_forest[i] = train_model_tree(data, params, csv_dim, &nodeId, &seed, ctx);
     }
+
+    parallelizable_time += omp_get_wtime() - start;
+
+    free(seeds);
     return random_forest;
 }
 
