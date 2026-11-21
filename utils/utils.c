@@ -8,8 +8,6 @@ int num_threads = 4;
 
 double parallelizable_time = 0;
 
-int inside_train_model = 0;
-
 double get_time(void)
 {
     struct timespec ts;
@@ -85,15 +83,6 @@ void *combine_rows(void *arg)
 double **combine_arrays(double **first, double **second, size_t n1, size_t n2, size_t cols)
 {
     double **combined = (double **)malloc((n1 + n2) * sizeof(double) * cols);
-
-    // Dentro do train_model já tem uma thread por bloco de árvores, então não cria mais
-    // threads aqui, e o tempo já está contado lá.
-    if (inside_train_model)
-    {
-        struct combine_args args = {first, second, combined, n1, 0, n1 + n2};
-        combine_rows(&args);
-        return combined;
-    }
 
     pthread_t *threads = malloc(sizeof(pthread_t) * num_threads);
     struct combine_args *args = malloc(sizeof(struct combine_args) * num_threads);
