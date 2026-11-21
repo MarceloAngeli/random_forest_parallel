@@ -31,6 +31,11 @@ Soma do tempo gasto nos trechos paralelizados, usado para calcular a fração F.
 extern double parallelizable_time;
 
 /*
+Fica em 1 enquanto as threads do train_model estão rodando.
+*/
+extern int inside_train_model;
+
+/*
 Returns the current wall clock time in seconds.
 */
 double get_time(void);

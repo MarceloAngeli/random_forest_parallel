@@ -1,5 +1,4 @@
 #include "tree.h"
-#include <pthread.h>
 
 /*
 Allocates memory for an empty DecisionTreeNode and returns a pointer to the node.
@@ -229,68 +228,11 @@ double calculate_gini_index(DecisionTreeData *data_split,
     return gini;
 }
 
-// Argumentos de cada thread do calculate_best_data_split. Os candidatos a split são
-// numerados de 0 até max_features * rows, e cada thread testa os de start até end.
-struct split_args
-{
-    double **data;
-    int *features;
-    size_t rows;
-    size_t cols;
-    int *class_labels;
-    size_t class_labels_count;
-    size_t start;
-    size_t end;
-
-    // Melhor split encontrado pela thread.
-    DecisionTreeData *best_data_split;
-    double best_value;
-    double best_gini;
-    int best_index;
-};
-
-void *find_best_split(void *arg)
-{
-    struct split_args *args = (struct split_args *)arg;
-
-    for (size_t k = args->start; k < args->end; ++k)
-    {
-        // Mesma ordem do laço original: primeiro a feature, depois a linha.
-        int feature_index = args->features[k / args->rows];
-        size_t j = k % args->rows;
-
-        DecisionTreeData *data_split = split_dataset(feature_index,
-                                                     args->data[j][feature_index],
-                                                     args->data,
-                                                     args->rows);
-        double gini = calculate_gini_index(data_split, args->class_labels, args->class_labels_count, args->cols);
-
-        if (gini < args->best_gini)
-        {
-            args->best_index = feature_index;
-            args->best_value = args->data[j][feature_index];
-            args->best_gini = gini;
-
-            // First free the memory that was previously allocated for the 'data_split' and pointer
-            // which was assigned to 'best_data_split' since now we have found a new better split.
-            if (args->best_data_split)
-                free_decision_tree_data(args->best_data_split);
-
-            args->best_data_split = data_split;
-        }
-        else
-        {
-            free_decision_tree_data(data_split);
-        }
-    }
-
-    return NULL;
-}
-
 DecisionTreeDataSplit calculate_best_data_split(double **data,
                                                 size_t max_features,
                                                 size_t rows,
                                                 size_t cols,
+                                                unsigned int *seed,
                                                 const ModelContext *ctx)
 {
     if (log_level > 1)
@@ -325,7 +267,7 @@ DecisionTreeDataSplit calculate_best_data_split(double **data,
         // Sorteia max_features colunas aleatórias do dataset.
         int max = cols - 2;
         int min = 0;
-        int index = rand() % (max + 1 - min) + min;
+        int index = rand_r(seed) % (max + 1 - min) + min;
         if (!contains_int(features, max_features /* size of 'features' array */, index))
         {
             if (log_level > 1)
@@ -336,57 +278,38 @@ DecisionTreeDataSplit calculate_best_data_split(double **data,
     if (log_level > 1)
         printf("-----------------------------------------\n");
 
-    pthread_t *threads = malloc(sizeof(pthread_t) * num_threads);
-    struct split_args *args = malloc(sizeof(struct split_args) * num_threads);
-    size_t candidates = max_features * rows;
-
-    double start = get_time();
-
-    // O sorteio das features já foi feito acima, daqui pra frente não tem mais rand().
-    // Cada thread testa um bloco de candidatos e guarda o melhor que achou.
-    for (int t = 0; t < num_threads; ++t)
+    //Para cada uma das colunas possíveis.
+    for (size_t i = 0; i < max_features; ++i)
     {
-        args[t].data = data;
-        args[t].features = features;
-        args[t].rows = rows;
-        args[t].cols = cols;
-        args[t].class_labels = classes.labels;
-        args[t].class_labels_count = classes.count;
-        args[t].start = t * candidates / num_threads;
-        args[t].end = (t + 1) * candidates / num_threads;
-        args[t].best_data_split = NULL;
-        args[t].best_value = DBL_MAX;
-        args[t].best_gini = DBL_MAX;
-        args[t].best_index = INT_MAX;
-        pthread_create(&threads[t], NULL, find_best_split, &args[t]);
-    }
-    for (int t = 0; t < num_threads; ++t)
-        pthread_join(threads[t], NULL);
-
-    // Junta os resultados na ordem das threads. Com o '<' em caso de empate ganha o
-    // candidato que vem antes, igual acontecia no laço sequencial.
-    for (int t = 0; t < num_threads; ++t)
-    {
-        if (args[t].best_gini < best_gini)
+        //Pegue o índice da coluna.
+        int feature_index = features[i];
+        for (size_t j = 0; j < rows; ++j)
         {
-            if (best_data_split)
-                free_decision_tree_data(best_data_split);
+            DecisionTreeData *data_split = split_dataset(feature_index,
+                                                         data[j][feature_index],
+                                                         data,
+                                                         rows);
+            double gini = calculate_gini_index(data_split, classes.labels, classes.count, cols);
 
-            best_index = args[t].best_index;
-            best_value = args[t].best_value;
-            best_gini = args[t].best_gini;
-            best_data_split = args[t].best_data_split;
-        }
-        else if (args[t].best_data_split)
-        {
-            free_decision_tree_data(args[t].best_data_split);
+            if (gini < best_gini)
+            {
+                best_index = feature_index;
+                best_value = data[j][feature_index];
+                best_gini = gini;
+
+                // First free the memory that was previously allocated for the 'data_split' and pointer
+                // which was assigned to 'best_data_split' since now we have found a new better split.
+                if (best_data_split)
+                    free_decision_tree_data(best_data_split);
+
+                best_data_split = data_split;
+            }
+            else
+            {
+                free_decision_tree_data(data_split);
+            }
         }
     }
-
-    parallelizable_time += get_time() - start;
-
-    free(threads);
-    free(args);
 
     // Free any other memory.
     free(features);
@@ -403,6 +326,7 @@ void grow(DecisionTreeNode *decision_tree,
           size_t rows,
           size_t cols,
           long *nodeId,
+          unsigned int *seed,
           const ModelContext *ctx)
 {
     DecisionTreeData left_half = decision_tree->split_data_halves[0];
@@ -454,6 +378,7 @@ void grow(DecisionTreeNode *decision_tree,
                                                                      max_features,
                                                                      left_half.length /* rows */,
                                                                      cols,
+                                                                     seed,
                                                                      ctx);
 
         // Create the left child of the current node and populate with data from the data split.
@@ -468,6 +393,7 @@ void grow(DecisionTreeNode *decision_tree,
              rows,
              cols,
              nodeId,
+             seed,
              ctx);
 
         free(data_split.data);
@@ -482,6 +408,7 @@ void grow(DecisionTreeNode *decision_tree,
                                                                      max_features,
                                                                      right_half.length /* rows */,
                                                                      cols,
+                                                                     seed,
                                                                      ctx);
 
         // Create the right child of the current node and populate with data from the data split.
@@ -496,6 +423,7 @@ void grow(DecisionTreeNode *decision_tree,
              rows,
              cols,
              nodeId,
+             seed,
              ctx);
 
         free(data_split.data);
