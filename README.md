@@ -90,26 +90,38 @@ quando `n` não é múltiplo do número de threads.
    (`save`) em vez de global.
 6. Só a parte da conversão entra no tempo paralelizável, a leitura do arquivo não.
 
-### train_model (`model/forest.c`)
+### train_model (`model/forest.c` e `model/tree.c`)
 
-1. O laço treina uma árvore por iteração e guarda em `random_forest[i]`. As árvores só
-   leem os dados de treino, então podem ser treinadas ao mesmo tempo.
-2. Tinha duas coisas compartilhadas entre as iterações: o `rand()` e o contador
-   `nodeId`.
-3. `rand()`: usa um estado global e não pode ser chamado por várias threads. Antes de
-   criar as threads, ainda de forma sequencial, é sorteada uma seed para cada árvore com
-   `rand()`. Dentro da árvore o sorteio das features usa `rand_r(seed)`. Para isso o
-   ponteiro `seed` foi adicionado como parâmetro em `train_model_tree`,
-   `calculate_best_data_split` e `grow`.
-4. `nodeId`: virou uma variável local, um contador por árvore. Ele só é usado para
-   debug, a diferença é que agora os ids recomeçam do zero em cada árvore.
-5. O laço foi para a função `train_trees` (struct `train_args`). Cada thread treina um
-   bloco de árvores e escreve só nas suas posições do `random_forest`.
-6. O tempo entre criar as threads e o último `join` é somado no tempo paralelizável.
+A primeira tentativa foi treinar uma árvore por thread direto no laço do `train_model`.
+Funcionava, mas a acurácia mudava em relação à versão serial (94.642857 em vez de
+95.357143). O motivo é o `rand()`: na versão serial existe uma sequência só, e cada
+árvore continua de onde a anterior parou. Quantos números uma árvore consome depende de
+quantos nós ela cria, então não dá para saber onde a árvore seguinte começa sem treinar
+a anterior. Com uma árvore por thread era preciso uma seed por árvore, e os números
+sorteados deixavam de ser os mesmos.
 
-Como a seed é sorteada por árvore, o resultado é o mesmo com qualquer número de threads.
-Mas a sequência de números aleatórios não é mais a mesma da versão serial, então a
-acurácia com `--seed 0` mudou de 95.357143 para 94.642857.
+Por isso a paralelização desceu um nível, para o `calculate_best_data_split`, que é
+chamado pelo `train_model` a cada nó de cada árvore e é onde fica quase todo o tempo:
+
+1. O laço do `train_model` continua sequencial, uma árvore depois da outra, com o
+   `rand()` original.
+2. Dentro do `calculate_best_data_split` o sorteio das features também continua
+   sequencial. Depois dele vem o laço que testa cada valor de cada feature sorteada como
+   ponto de corte, e esse laço não usa `rand()`.
+3. Os candidatos a split são numerados de `0` até `max_features * rows`. O candidato `k`
+   usa a feature `features[k / rows]` e a linha `k % rows`, que é a mesma ordem dos dois
+   laços originais.
+4. O laço foi para a função `find_best_split` (struct `split_args`). Cada thread testa
+   um bloco de candidatos e guarda na própria struct o melhor split que achou, então
+   não tem variável compartilhada sendo escrita.
+5. Depois do `join` a thread principal compara os resultados na ordem das threads,
+   usando `<`. Em caso de empate ganha o candidato que vem antes, igual acontecia no
+   laço sequencial, e os splits que perderam são liberados.
+6. O tempo entre criar as threads e terminar essa comparação é somado no tempo
+   paralelizável.
+
+Assim a acurácia com `--seed 0` é 95.357143, igual à da versão serial, com qualquer
+número de threads.
 
 ### combine_arrays (`utils/utils.c`)
 
@@ -120,16 +132,13 @@ acurácia com `--seed 0` mudou de 95.357143 para 94.642857.
    sabe onde escreve.
 3. Esse laço foi para a função `combine_rows` (struct `combine_args`), e o
    `combine_arrays` divide o intervalo entre as threads.
-4. A função é chamada pelo `grow`, que já roda dentro das threads do `train_model`.
-   Criar mais threads ali dentro só atrapalharia, e o tempo já está contado no
-   `train_model`. Por isso o `train_model` liga a variável `inside_train_model` enquanto
-   as threads dele estão rodando, e nesse caso o `combine_arrays` chama o `combine_rows`
-   direto, sem criar threads e sem somar o tempo de novo.
+4. A função é chamada pelo `grow`, na thread principal, então o tempo dela é somado
+   normalmente no tempo paralelizável.
 
 ## Mudanças no Makefile
 
 - `-pthread` para compilar e linkar com a biblioteca de threads.
-- `-D_POSIX_C_SOURCE=200809L` porque o `rand_r`, o `strtok_r` e o `clock_gettime` são
+- `-D_POSIX_C_SOURCE=200809L` porque o `strtok_r` e o `clock_gettime` são
   funções POSIX e não são declaradas com `-std=c99` puro.
 
 ## Tempos
@@ -138,9 +147,10 @@ Medidos com `--seed 0` em uma máquina de 8 núcleos, uma execução de cada:
 
 | threads | tempo total (s) | F      |
 |---------|-----------------|--------|
-| 1       | 10.78           | 0.9997 |
-| 2       | 6.04            | 0.9996 |
-| 4       | 3.34            | 0.9995 |
-| 8       | 3.14            | 0.9994 |
+| 1       | 11.96           | 0.9980 |
+| 2       | 7.35            | 0.9969 |
+| 4       | 4.61            | 0.9954 |
+| 8       | 4.78            | 0.9957 |
 
-A versão serial original leva em torno de 10.6 s.
+A versão serial original leva em torno de 10.6 s. Com 1 thread o programa fica um pouco
+mais lento que ela porque as threads são criadas a cada nó da árvore.
