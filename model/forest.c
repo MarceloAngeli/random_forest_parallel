@@ -1,9 +1,11 @@
 #include "forest.h"
+#include <pthread.h>
 
 const DecisionTreeNode *train_model_tree(double **data,
                                          const RandomForestParameters *params,
                                          const struct dim *csv_dim,
                                          long *nodeId /* Ascending node ID generator */,
+                                         unsigned int *seed /* Seed of this tree */,
                                          const ModelContext *ctx)
 {
     //Retorna um Node vazio.
@@ -13,6 +15,7 @@ const DecisionTreeNode *train_model_tree(double **data,
                                                                  params->max_features,
                                                                  csv_dim->rows,
                                                                  csv_dim->cols,
+                                                                 seed,
                                                                  ctx);
     
                                                                  
@@ -36,12 +39,42 @@ const DecisionTreeNode *train_model_tree(double **data,
          csv_dim->rows,
          csv_dim->cols,
          nodeId,
+         seed,
          ctx);
 
     // Free any temp memory.
     free(data_split.data);
 
     return root;
+}
+
+// Argumentos de cada thread do train_model: treina as árvores de start até end.
+struct train_args
+{
+    double **data;
+    const RandomForestParameters *params;
+    const struct dim *csv_dim;
+    const ModelContext *ctx;
+    const DecisionTreeNode **random_forest;
+    unsigned int *seeds;
+    size_t start;
+    size_t end;
+};
+
+void *train_trees(void *arg)
+{
+    struct train_args *args = (struct train_args *)arg;
+
+    for (size_t i = args->start; i < args->end; ++i)
+    {
+        // Node ID generator. Agora é um por árvore, senão as threads disputariam o mesmo contador.
+        long nodeId = 0;
+        unsigned int seed = args->seeds[i];
+
+        args->random_forest[i] = train_model_tree(args->data, args->params, args->csv_dim, &nodeId, &seed, args->ctx);
+    }
+
+    return NULL;
 }
 
 const DecisionTreeNode **train_model(double **data,
@@ -53,19 +86,41 @@ const DecisionTreeNode **train_model(double **data,
     const DecisionTreeNode **random_forest = (const DecisionTreeNode **)
         malloc(sizeof(DecisionTreeNode *) * params->n_estimators);
 
-    // Node ID generator. We use this such that every node in the tree gets assigned a strictly
-    // increasing ID for debugging.
-    long nodeId = 0;
+    // O rand() não pode ser chamado por várias threads, então sorteia aqui (ainda sequencial)
+    // uma seed pra cada árvore e dentro da árvore usa o rand_r.
+    unsigned int *seeds = malloc(sizeof(unsigned int) * params->n_estimators);
+    for (size_t i = 0; i < params->n_estimators; ++i)
+        seeds[i] = rand();
+
+    pthread_t *threads = malloc(sizeof(pthread_t) * num_threads);
+    struct train_args *args = malloc(sizeof(struct train_args) * num_threads);
+
+    double start = get_time();
+    inside_train_model = 1;
 
     // Populate the array with allocated memory for the random forest with pointers to individual decision
-    // trees.
-
-    // As árvores são treinadas uma depois da outra pra manter a ordem do rand() igual à da
-    // versão serial. As threads ficam dentro do calculate_best_data_split.
-    for (size_t i = 0; i < params->n_estimators; ++i)
+    // trees. Cada thread treina um bloco de árvores.
+    for (int t = 0; t < num_threads; ++t)
     {
-        random_forest[i] = train_model_tree(data, params, csv_dim, &nodeId, ctx);
+        args[t].data = data;
+        args[t].params = params;
+        args[t].csv_dim = csv_dim;
+        args[t].ctx = ctx;
+        args[t].random_forest = random_forest;
+        args[t].seeds = seeds;
+        args[t].start = t * params->n_estimators / num_threads;
+        args[t].end = (t + 1) * params->n_estimators / num_threads;
+        pthread_create(&threads[t], NULL, train_trees, &args[t]);
     }
+    for (int t = 0; t < num_threads; ++t)
+        pthread_join(threads[t], NULL);
+
+    inside_train_model = 0;
+    parallelizable_time += get_time() - start;
+
+    free(threads);
+    free(args);
+    free(seeds);
     return random_forest;
 }
 
