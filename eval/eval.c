@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <pthread.h>
 #include "eval.h"
 #include "../utils/log.h"
 
@@ -114,19 +115,29 @@ double eval_model(const DecisionTreeNode **random_forest,
     return (double)num_correct / (double)ctx->rowsPerFold;
 }
 
-double cross_validate(double **data,
-                      const RandomForestParameters *params,
-                      const struct dim *csv_dim,
-                      const size_t k_folds) // size_t é o tamanho padrão de um ponteiro na arquitetura que
-                      //esta sendo usada
+// Argumentos de cada thread do cross_validate: roda os folds de start ate end.
+struct fold_args
 {
-    double sumAccuracy = 0;
-    size_t rows = csv_dim->rows;
-    size_t cols = csv_dim->cols;
-    size_t rowsPerFold = rows / k_folds;
+    double **data;
+    const RandomForestParameters *params;
+    const struct dim *csv_dim;
+    size_t rowsPerFold;
+    unsigned int *seeds;  // uma seed por fold, sorteadas antes de criar as threads
+    double *accuracies;   // cada thread escreve so nas posicoes dos seus folds
+    size_t start;
+    size_t end;
+};
 
-    
-    for (size_t foldIdx = 0; foldIdx < k_folds; ++foldIdx)
+// Corpo do laco que antes ficava no cross_validate: treina e avalia um fold por iteracao.
+void *run_folds(void *arg)
+{
+    struct fold_args *args = (struct fold_args *)arg;
+    double **data = args->data;
+    size_t rows = args->csv_dim->rows;
+    size_t cols = args->csv_dim->cols;
+    size_t rowsPerFold = args->rowsPerFold;
+
+    for (size_t foldIdx = args->start; foldIdx < args->end; ++foldIdx)
     {
         // Allocate training data (all rows except the test fold)
         size_t train_rows = rows - rowsPerFold;
@@ -148,27 +159,79 @@ double cross_validate(double **data,
             }
         }
         struct dim train_dim = {train_rows, cols};
+        // O rand() tem estado global, entao cada fold usa o rand_r com a sua propria seed.
+        unsigned int seed = args->seeds[foldIdx];
         const ModelContext ctx = {
             .testingFoldIdx = foldIdx,
-            .rowsPerFold = rowsPerFold
+            .rowsPerFold = rowsPerFold,
+            .seed = &seed
         };
         // Train on training data only
         //Agora o bixo pega...
         const DecisionTreeNode **random_forest = train_model(
             train_data,
-            params,
+            args->params,
             &train_dim,
             &ctx);
         // Evaluate on the test fold (still using the full data array for eval_model, which uses ctx to select test rows)
-        const double accuracy = eval_model(
+        args->accuracies[foldIdx] = eval_model(
             random_forest,
             data,
-            params,
-            csv_dim,
+            args->params,
+            args->csv_dim,
             &ctx);
-        sumAccuracy += accuracy;
-        free_random_forest(&random_forest, params->n_estimators);
+        free_random_forest(&random_forest, args->params->n_estimators);
         free(train_data);
     }
+
+    return NULL;
+}
+
+double cross_validate(double **data,
+                      const RandomForestParameters *params,
+                      const struct dim *csv_dim,
+                      const size_t k_folds)
+{
+    size_t rowsPerFold = csv_dim->rows / k_folds;
+
+    // Sorteia aqui, ainda sequencial, uma seed para cada fold. Assim o resultado
+    // e o mesmo com qualquer numero de threads.
+    unsigned int *seeds = malloc(sizeof(unsigned int) * k_folds);
+    for (size_t f = 0; f < k_folds; ++f)
+        seeds[f] = rand();
+
+    double *accuracies = malloc(sizeof(double) * k_folds);
+    pthread_t *threads = malloc(sizeof(pthread_t) * num_threads);
+    struct fold_args *args = malloc(sizeof(struct fold_args) * num_threads);
+
+    double start = get_time();
+
+    // Cada thread roda um bloco de folds.
+    for (int t = 0; t < num_threads; ++t)
+    {
+        args[t].data = data;
+        args[t].params = params;
+        args[t].csv_dim = csv_dim;
+        args[t].rowsPerFold = rowsPerFold;
+        args[t].seeds = seeds;
+        args[t].accuracies = accuracies;
+        args[t].start = t * k_folds / num_threads;
+        args[t].end = (t + 1) * k_folds / num_threads;
+        pthread_create(&threads[t], NULL, run_folds, &args[t]);
+    }
+    for (int t = 0; t < num_threads; ++t)
+        pthread_join(threads[t], NULL);
+
+    parallelizable_time += get_time() - start;
+
+    // Soma na ordem dos folds, depois do join, para nao precisar de mutex.
+    double sumAccuracy = 0;
+    for (size_t f = 0; f < k_folds; ++f)
+        sumAccuracy += accuracies[f];
+
+    free(threads);
+    free(args);
+    free(accuracies);
+    free(seeds);
     return sumAccuracy / k_folds;
 }

@@ -1,4 +1,5 @@
 #include "tree.h"
+#include "../utils/utils.h"
 
 /*
 Allocates memory for an empty DecisionTreeNode and returns a pointer to the node.
@@ -192,6 +193,7 @@ double calculate_gini_index(DecisionTreeData *data_split,
     
     //Da pra fazer cada Thread Iterar sobre uma parte. PARALELIZAR
     //Itera sobre as duas metades.
+
     for (size_t i = 0; i < count; ++i)
     {
         DecisionTreeData group = data_split[i];
@@ -232,7 +234,6 @@ DecisionTreeDataSplit calculate_best_data_split(double **data,
                                                 size_t max_features,
                                                 size_t rows,
                                                 size_t cols,
-                                                unsigned int *seed,
                                                 const ModelContext *ctx)
 {
     if (log_level > 1)
@@ -267,7 +268,7 @@ DecisionTreeDataSplit calculate_best_data_split(double **data,
         // Sorteia max_features colunas aleatórias do dataset.
         int max = cols - 2;
         int min = 0;
-        int index = rand_r(seed) % (max + 1 - min) + min;
+        int index = rand_r(ctx->seed) % (max + 1 - min) + min;
         if (!contains_int(features, max_features /* size of 'features' array */, index))
         {
             if (log_level > 1)
@@ -326,7 +327,6 @@ void grow(DecisionTreeNode *decision_tree,
           size_t rows,
           size_t cols,
           long *nodeId,
-          unsigned int *seed,
           const ModelContext *ctx)
 {
     DecisionTreeData left_half = decision_tree->split_data_halves[0];
@@ -378,7 +378,6 @@ void grow(DecisionTreeNode *decision_tree,
                                                                      max_features,
                                                                      left_half.length /* rows */,
                                                                      cols,
-                                                                     seed,
                                                                      ctx);
 
         // Create the left child of the current node and populate with data from the data split.
@@ -393,7 +392,6 @@ void grow(DecisionTreeNode *decision_tree,
              rows,
              cols,
              nodeId,
-             seed,
              ctx);
 
         free(data_split.data);
@@ -408,7 +406,6 @@ void grow(DecisionTreeNode *decision_tree,
                                                                      max_features,
                                                                      right_half.length /* rows */,
                                                                      cols,
-                                                                     seed,
                                                                      ctx);
 
         // Create the right child of the current node and populate with data from the data split.
@@ -423,7 +420,6 @@ void grow(DecisionTreeNode *decision_tree,
              rows,
              cols,
              nodeId,
-             seed,
              ctx);
 
         free(data_split.data);

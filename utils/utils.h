@@ -4,6 +4,14 @@
 #include <stdlib.h>
 #include "data.h"
 
+double get_time(void);
+extern double parallelizable_time;
+
+/*
+Number of threads used in cross_validate, can be adjusted via the '--num_threads' argument.
+*/
+extern int num_threads;
+
 /*
 Struct to hold information about a current model training run.
 */
@@ -11,6 +19,8 @@ struct ModelContext
 {
     const size_t testingFoldIdx;
     const size_t rowsPerFold;
+    // Estado do rand_r deste fold. Cada thread tem o seu, entao nao ha disputa.
+    unsigned int *seed;
 };
 
 typedef struct ModelContext ModelContext;
@@ -19,26 +29,6 @@ typedef struct ModelContext ModelContext;
 The debug log level that can be adjusted via an argument.
 */
 extern int log_level;
-
-/*
-Number of threads used in the parallel parts, can be adjusted via the '--num_threads' argument.
-*/
-extern int num_threads;
-
-/*
-Soma do tempo gasto nos trechos paralelizados, usado para calcular a fração F.
-*/
-extern double parallelizable_time;
-
-/*
-Fica em 1 enquanto as threads do train_model estão rodando.
-*/
-extern int inside_train_model;
-
-/*
-Returns the current wall clock time in seconds.
-*/
-double get_time(void);
 
 /*
 Given a pointer to a buffer array of integers returns whether or not a given integer 'n'
