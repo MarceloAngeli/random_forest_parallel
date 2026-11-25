@@ -39,10 +39,9 @@ double start = get_time();
 parallelizable_time += get_time() - start;
 ```
 
-Quem soma é a thread principal, então a variável não precisa de mutex. Os timers que a
-versão serial tinha no `parse_csv`, `pivot_data`, `train_model` e `combine_arrays` foram
-removidos: os dois últimos agora rodam dentro das threads e somar na mesma variável seria
-uma condição de corrida, e os dois primeiros continuam sequenciais.
+Quem soma é a thread principal, então a variável não precisa de mutex. Na versão serial
+instrumentada (`randforest-serial-opt-instr`) o timer fica no mesmo lugar, em volta do
+laço dos folds do `cross_validate`, então o F das duas versões mede o mesmo trecho.
 
 No fim o `main` escreve `F = parallelizable_time / tempo total` no `stderr` com 4 casas.
 
